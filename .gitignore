@@ -1,0 +1,43 @@
+# ======================
+# React (Frontend)
+# ======================
+node_modules/
+build/
+dist/
+.env
+.env.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ======================
+# Flask (Backend)
+# ======================
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+instance/
+
+# Dataset / ML Models / Data
+backend/data/*.csv
+*.h5
+*.pkl
+*.onnx
+
+# ======================
+# General
+# ======================
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
