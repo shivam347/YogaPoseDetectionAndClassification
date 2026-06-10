@@ -107,7 +107,7 @@ const LoginForm = () => {
             )}
           </div>
 
-          {/* <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between">
             <label className="flex items-center gap-2 text-sm text-gray-600">
               <input type="checkbox" className="rounded border-gray-300" />
               Remember me
@@ -115,7 +115,7 @@ const LoginForm = () => {
             <Link to="/forgot-password" className="text-sm text-sage-600 hover:underline">
               Forgot password?
             </Link>
-          </div> */}
+          </div>
         </CardContent>
 
         <CardFooter className="flex flex-col gap-4">
