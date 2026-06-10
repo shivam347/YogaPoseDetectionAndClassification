@@ -89,7 +89,7 @@ def classify_pose():
             'message': f'Pose classification failed: {str(e)}'
         }), 500
 
-
+# Change in this function is requirred 
 @pose_bp.route('/landmarks', methods=['POST'])
 def extract_landmarks():
     try:
@@ -156,7 +156,7 @@ def get_supported_poses():
             'message': f'Failed to get poses: {str(e)}'
         }), 500
 
-
+#  No change is requirred in this function
 @pose_bp.route('/feedback', methods=['POST'])
 def get_pose_feedback():
     """Get feedback for current pose compared to target."""

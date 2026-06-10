@@ -4,7 +4,220 @@ import cv2
 import joblib
 import os
 import json
+import math
 from typing import Dict, List, Tuple, Optional
+
+mp_pose = mp.solutions.pose
+VIS_MIN = 0.40
+
+
+def get_lm(landmarks, idx):
+    lm = landmarks[idx]
+    if lm.visibility < VIS_MIN:
+        return None
+    return (lm.x, lm.y, lm.z)
+
+
+def angle_2d(a, b, c):
+    if a is None or b is None or c is None:
+        return 0.0
+    ax, ay = a[0] - b[0], a[1] - b[1]
+    cx, cy = c[0] - b[0], c[1] - b[1]
+    angle = math.degrees(math.atan2(cy, cx) - math.atan2(ay, ax))
+    angle = abs(angle)
+    if angle > 180:
+        angle = 360 - angle
+    return round(angle, 4)
+
+
+def vector_angle_xy(a, b):
+    if a is None or b is None:
+        return 0.0
+    return round(math.degrees(math.atan2(b[1] - a[1], b[0] - a[0])), 4)
+
+
+def midpoint(a, b):
+    if a is None or b is None:
+        return None
+    return ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2)
+
+
+def extract_all_features(landmarks):
+    P = mp_pose.PoseLandmark
+
+    # Extract landmarks
+    lms = {
+        name: get_lm(landmarks, P[name].value)
+        for name in P.__members__
+        if name in P.__members__
+    }
+    # Frequently used landmarks
+    nose = lms.get("NOSE")
+    l_sh = lms.get("LEFT_SHOULDER")
+    r_sh = lms.get("RIGHT_SHOULDER")
+    l_el = lms.get("LEFT_ELBOW")
+    r_el = lms.get("RIGHT_ELBOW")
+    l_wr = lms.get("LEFT_WRIST")
+    r_wr = lms.get("RIGHT_WRIST")
+    l_hi = lms.get("LEFT_HIP")
+    r_hi = lms.get("RIGHT_HIP")
+    l_kn = lms.get("LEFT_KNEE")
+    r_kn = lms.get("RIGHT_KNEE")
+    l_an = lms.get("LEFT_ANKLE")
+    r_an = lms.get("RIGHT_ANKLE")
+    l_foot = lms.get("LEFT_FOOT_INDEX")
+    r_foot = lms.get("RIGHT_FOOT_INDEX")
+
+    mid_sh = midpoint(l_sh, r_sh)
+    mid_hi = midpoint(l_hi, r_hi)
+
+    # Reference torso length
+    if mid_sh and mid_hi:
+        torso_len = math.hypot(mid_sh[0] - mid_hi[0], mid_sh[1] - mid_hi[1])
+        if torso_len < 1e-6:
+            torso_len = 1.0
+    else:
+        torso_len = 1.0
+
+    # 1. Joint Angles — /180 to match training's normalize_angles()
+    # spine_tilt uses atan2(dx, -dy) to match feature_engineering.py exactly
+    _spine_tilt = None
+    if mid_sh and mid_hi:
+        dx = mid_sh[0] - mid_hi[0]
+        dy = mid_sh[1] - mid_hi[1]
+        _spine_tilt = round(math.degrees(math.atan2(dx, -dy)), 4)
+
+    feat_angles = {
+        "left_elbow_angle": angle_2d(l_sh, l_el, l_wr) / 180.0,
+        "right_elbow_angle": angle_2d(r_sh, r_el, r_wr) / 180.0,
+        "left_shoulder_angle": angle_2d(l_el, l_sh, l_hi) / 180.0,
+        "right_shoulder_angle": angle_2d(r_hi, r_sh, r_el) / 180.0,
+        "neck_angle": angle_2d(nose, l_sh, r_sh) / 180.0,
+        "left_hip_angle": angle_2d(l_sh, l_hi, l_kn) / 180.0,
+        "right_hip_angle": angle_2d(r_sh, r_hi, r_kn) / 180.0,
+        "left_knee_angle": angle_2d(l_hi, l_kn, l_an) / 180.0,
+        "right_knee_angle": angle_2d(r_hi, r_kn, r_an) / 180.0,
+        "left_ankle_angle": angle_2d(l_kn, l_an, l_foot) / 180.0,
+        "right_ankle_angle": angle_2d(r_kn, r_an, r_foot) / 180.0,
+        "spine_tilt_deg": (_spine_tilt / 180.0) if _spine_tilt is not None else 0.0,
+        "pelvis_tilt_deg": vector_angle_xy(l_hi, r_hi) / 180.0,
+        "shoulder_line_deg": vector_angle_xy(l_sh, r_sh) / 180.0,
+        "inter_ankle_angle_L": angle_2d(r_an, r_hi, l_an) / 180.0,
+        "inter_ankle_angle_R": angle_2d(l_an, l_hi, r_an) / 180.0,
+    }
+
+    # 2. Orientation — raw torso-normalised ratios to match feature_engineering.py
+    #    (The old (v+1)/2 remapping was WRONG — training stored raw ratios)
+    sh_yaw = (
+        math.atan2(r_sh[1] - l_sh[1], r_sh[0] - l_sh[0]) if (l_sh and r_sh) else 0.0
+    )
+    hi_yaw = (
+        math.atan2(r_hi[1] - l_hi[1], r_hi[0] - l_hi[0]) if (l_hi and r_hi) else 0.0
+    )
+
+    feat_orient = {
+        "shoulder_yaw_sin": round(math.sin(sh_yaw), 6),
+        "shoulder_yaw_cos": round(math.cos(sh_yaw), 6),
+        "hip_yaw_sin": round(math.sin(hi_yaw), 6),
+        "hip_yaw_cos": round(math.cos(hi_yaw), 6),
+        "shoulder_depth_diff": round((l_sh[2] - r_sh[2]) / torso_len, 6)
+        if (l_sh and r_sh)
+        else 0.0,
+        "hip_depth_diff": round((l_hi[2] - r_hi[2]) / torso_len, 6)
+        if (l_hi and r_hi)
+        else 0.0,
+        "ankle_depth_diff": round((l_an[2] - r_an[2]) / torso_len, 6)
+        if (l_an and r_an)
+        else 0.0,
+        "spine_lean_depth": round(
+            ((l_sh[2] + r_sh[2]) / 2 - (l_hi[2] + r_hi[2]) / 2) / torso_len, 6
+        )
+        if (l_sh and r_sh and l_hi and r_hi)
+        else 0.0,
+        "head_hip_depth_diff": round((nose[2] - (l_hi[2] + r_hi[2]) / 2) / torso_len, 6)
+        if (nose and l_hi and r_hi)
+        else 0.0,
+    }
+
+    # 3. Symmetry
+    sd = lambda a, b: (a - b) if (a and b) else 0.0
+    l_el_a = angle_2d(l_sh, l_el, l_wr)
+    r_el_a = angle_2d(r_sh, r_el, r_wr)
+    l_sh_a = angle_2d(l_el, l_sh, l_hi)
+    r_sh_a = angle_2d(r_hi, r_sh, r_el)
+    l_hi_a = angle_2d(l_sh, l_hi, l_kn)
+    r_hi_a = angle_2d(r_sh, r_hi, r_kn)
+    l_kn_a = angle_2d(l_hi, l_kn, l_an)
+    r_kn_a = angle_2d(r_hi, r_kn, r_an)
+    l_an_a = angle_2d(l_kn, l_an, l_foot)
+    r_an_a = angle_2d(r_kn, r_an, r_foot)
+
+    feat_sym = {
+        "elbow_diff": sd(l_el_a, r_el_a) / 180.0,
+        "shoulder_diff": sd(l_sh_a, r_sh_a) / 180.0,
+        "hip_diff": sd(l_hi_a, r_hi_a) / 180.0,
+        "knee_diff": sd(l_kn_a, r_kn_a) / 180.0,
+        "ankle_diff": sd(l_an_a, r_an_a) / 180.0,
+        "elbow_abs_diff": abs(sd(l_el_a, r_el_a)) / 180.0,
+        "shoulder_abs_diff": abs(sd(l_sh_a, r_sh_a)) / 180.0,
+        "hip_abs_diff": abs(sd(l_hi_a, r_hi_a)) / 180.0,
+        "knee_abs_diff": abs(sd(l_kn_a, r_kn_a)) / 180.0,
+        "ankle_abs_diff": abs(sd(l_an_a, r_an_a)) / 180.0,
+        "knee_dominant_side": (1 if l_kn_a < r_kn_a else -1)
+        if (l_kn_a and r_kn_a)
+        else 0,
+        "hip_dominant_side": (1 if l_hi_a < r_hi_a else -1)
+        if (l_hi_a and r_hi_a)
+        else 0,
+    }
+
+    # 4. Raw Landmarks
+    LANDMARK_NAMES = [
+        "NOSE",
+        "LEFT_EYE_INNER",
+        "LEFT_EYE",
+        "LEFT_EYE_OUTER",
+        "RIGHT_EYE_INNER",
+        "RIGHT_EYE",
+        "RIGHT_EYE_OUTER",
+        "LEFT_EAR",
+        "RIGHT_EAR",
+        "MOUTH_LEFT",
+        "MOUTH_RIGHT",
+        "LEFT_SHOULDER",
+        "RIGHT_SHOULDER",
+        "LEFT_ELBOW",
+        "RIGHT_ELBOW",
+        "LEFT_WRIST",
+        "RIGHT_WRIST",
+        "LEFT_PINKY",
+        "RIGHT_PINKY",
+        "LEFT_INDEX",
+        "RIGHT_INDEX",
+        "LEFT_THUMB",
+        "RIGHT_THUMB",
+        "LEFT_HIP",
+        "RIGHT_HIP",
+        "LEFT_KNEE",
+        "RIGHT_KNEE",
+        "LEFT_ANKLE",
+        "RIGHT_ANKLE",
+        "LEFT_HEEL",
+        "RIGHT_HEEL",
+        "LEFT_FOOT_INDEX",
+        "RIGHT_FOOT_INDEX",
+    ]
+    feat_raw = {}
+    for name in LANDMARK_NAMES:
+        lm = landmarks[P[name].value]
+        feat_raw[f"{name}_x"] = round(lm.x, 6)
+        feat_raw[f"{name}_y"] = round(lm.y, 6)
+        feat_raw[f"{name}_z"] = (
+            round(lm.z / torso_len, 6) if torso_len > 1e-6 else round(lm.z, 6)
+        )
+        feat_raw[f"{name}_vis"] = round(lm.visibility, 6)
+
+    return {**feat_raw, **feat_angles, **feat_orient, **feat_sym}
 
 
 class PoseDetectionService:
@@ -81,7 +294,7 @@ class PoseDetectionService:
    
 #  Extracts landmarks from the image using MediaPipe Pose
     def extract_landmarks(self, image: np.ndarray) -> Optional[np.ndarray]:
-        # """Extract features EXACTLY like dataset (landmarks + angles)."""
+        # Extract features EXACTLY like dataset (landmarks + angles).
 
         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         results = self.pose.process(image_rgb)
@@ -90,69 +303,12 @@ class PoseDetectionService:
             return None
 
         landmarks = results.pose_landmarks.landmark
-        feature_dict = {}
+        feature_dict = extract_all_features(landmarks)
 
-        points = self.mp_pose.PoseLandmark
-
-        for p, lm in zip(points, landmarks):
-            name = p.name
-
-            feature_dict[f"{name}_x"] = lm.x
-            feature_dict[f"{name}_y"] = lm.y
-            feature_dict[f"{name}_z"] = lm.z
-            feature_dict[f"{name}_vis"] = lm.visibility
-
-        h, w = image.shape[:2]
-
-        lm_list = []
-        for lm in landmarks:
-            lm_list.append((int(lm.x * w), int(lm.y * h), lm.z * w))
-
-        r = self._angles_finder(lm_list)
-
-        angle_names = [
-            "left_elbow_angle",
-            "right_elbow_angle",
-            "left_shoulder_angle",
-            "right_shoulder_angle",
-            "left_knee_angle",
-            "right_knee_angle",
-            "angle_for_ardhaChandrasana1",
-            "angle_for_ardhaChandrasana2",
-            "hand_angle",
-            "left_hip_angle",
-            "right_hip_angle",
-            "neck_angle_uk",
-            "left_wrist_angle_bk",
-            "right_wrist_angle_bk",
-        ]
-
-        for name, value in zip(angle_names, r):
-            feature_dict[name] = value
-
-        if hasattr(self, "feature_columns"):
+        if hasattr(self, "feature_columns") and self.feature_columns is not None:
             return np.array([feature_dict.get(col, 0) for col in self.feature_columns])
 
         return np.array(list(feature_dict.values()))
-
-#  Maps 14 specific yoga relevant angles like elbows , shoulders, hips, knees, neck, wrists
-    def _angles_finder(self, landmarks):
-        return [
-            self._calculate_angle(landmarks[11], landmarks[13], landmarks[15]),
-            self._calculate_angle(landmarks[12], landmarks[14], landmarks[16]),
-            self._calculate_angle(landmarks[13], landmarks[11], landmarks[23]),
-            self._calculate_angle(landmarks[24], landmarks[12], landmarks[14]),
-            self._calculate_angle(landmarks[23], landmarks[25], landmarks[27]),
-            self._calculate_angle(landmarks[24], landmarks[26], landmarks[28]),
-            self._calculate_angle(landmarks[28], landmarks[24], landmarks[27]),
-            self._calculate_angle(landmarks[27], landmarks[23], landmarks[28]),
-            self._calculate_angle(landmarks[13], landmarks[12], landmarks[14]),
-            self._calculate_angle(landmarks[11], landmarks[23], landmarks[25]),
-            self._calculate_angle(landmarks[12], landmarks[24], landmarks[26]),
-            self._calculate_angle(landmarks[0], landmarks[11], landmarks[12]),
-            self._calculate_angle(landmarks[15], landmarks[23], landmarks[27]),
-            self._calculate_angle(landmarks[16], landmarks[24], landmarks[28]),
-        ]
 
     def classify_pose(self, features: np.ndarray) -> Dict:
     # ---------------------------
@@ -344,8 +500,21 @@ class PoseDetectionService:
         """Calculate key joint angles from landmarks. Aligned with dataset features."""
         angles = {}
 
-        # If landmarks length is >= 146, it contains our 14 pre-calculated dataset angles at the end.
-        if len(landmarks) >= 146:
+        if len(landmarks) >= 169:
+            # New 169-feature format: angles are normalized (/ 180.0), so we multiply by 180.0 to get degrees
+            angles["left_elbow"] = float(landmarks[132]) * 180.0
+            angles["right_elbow"] = float(landmarks[133]) * 180.0
+            angles["left_shoulder"] = float(landmarks[134]) * 180.0
+            angles["right_shoulder"] = float(landmarks[135]) * 180.0
+            angles["neck"] = float(landmarks[136]) * 180.0
+            angles["left_hip"] = float(landmarks[137]) * 180.0
+            angles["right_hip"] = float(landmarks[138]) * 180.0
+            angles["left_knee"] = float(landmarks[139]) * 180.0
+            angles["right_knee"] = float(landmarks[140]) * 180.0
+            return angles
+
+        if len(landmarks) == 146:
+            # Old 146-feature format (values are in degrees)
             angles["left_elbow"] = float(landmarks[132])
             angles["right_elbow"] = float(landmarks[133])
             angles["left_shoulder"] = float(landmarks[134])
