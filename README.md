@@ -4,10 +4,6 @@ A full-stack yoga practice application that recommends asanas, guides users thro
 
 The project includes a React frontend, a Flask backend API, MySQL persistence, and machine-learning utilities for pose detection using MediaPipe.
 
-## Project Status
-
-This project is under active development. The pose detection feature is currently not working reliably and still needs debugging/training improvements before it can be considered production-ready.
-
 ## Features
 
 - User registration and login with JWT authentication
@@ -79,108 +75,20 @@ This project is under active development. The pose detection feature is currentl
 - MySQL 8+
 - A webcam-enabled browser for practice mode
 
-## Backend Setup
+## Screen-Shots
 
-From the project root:
+![categories](<Screenshot 2026-05-28 110824.png>)
 
-```bash
-cd backend
-python -m venv venv
-```
+![dashboard](<Screenshot 2026-05-28 110906.png>)
 
-Activate the virtual environment:
+![corpse Pose](<Screenshot 2026-05-26 100737.png>)
 
-```bash
-# Windows
-venv\Scripts\activate
+![Mountain Pose](<Screenshot 2026-05-26 095534.png>)
 
-# macOS/Linux
-source venv/bin/activate
-```
+![Natarajasana Pose](<Screenshot 2026-05-26 094941.png>)
 
-Install dependencies:
+![Cat-Cow Pose](<Screenshot 2026-05-26 095903.png>)
 
-```bash
-pip install -r requirements.txt
-```
-
-Create a MySQL database:
-
-```sql
-CREATE DATABASE yoga_pose_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-```
-
-Create `backend/.env`:
-
-```env
-FLASK_ENV=development
-FLASK_APP=run.py
-FLASK_DEBUG=True
-SECRET_KEY=change-this-secret
-JWT_SECRET_KEY=change-this-jwt-secret
-DATABASE_URL=mysql://root:password@localhost/yoga_pose_db
-```
-
-Initialize and seed the database:
-
-```bash
-flask db upgrade
-python seed_data.py
-```
-
-Start the backend:
-
-```bash
-python run.py
-```
-
-The backend runs at `http://localhost:5000`.
-
-## Frontend Setup
-
-Open a new terminal from the project root:
-
-```bash
-cd app
-npm install
-```
-
-Create `app/.env`:
-
-```env
-VITE_API_URL=http://localhost:5000/api
-```
-
-Start the frontend:
-
-```bash
-npm run dev
-```
-
-The frontend runs at `http://localhost:5173`.
-
-## Useful Commands
-
-### Frontend
-
-```bash
-cd app
-npm run dev
-npm run build
-npm run lint
-npm run preview
-```
-
-### Backend
-
-```bash
-cd backend
-python run.py
-flask db migrate -m "Migration message"
-flask db upgrade
-python seed_data.py
-flask train-model
-```
 
 ## API Overview
 
